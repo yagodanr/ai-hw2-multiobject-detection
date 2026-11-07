@@ -26,6 +26,8 @@ Notebooks are numbered in pipeline order. Reusable code goes in `src/common/` an
 | `src/01_preprocess.ipynb` | EDA, frame step, label cleaning, ignore handling, COCO and YOLO export |
 | `src/02_faster_rcnn.ipynb`, `src/04_retinanet.ipynb` | Person A's detectors: experiments, comparison, failure analysis, submission |
 | `src/03_visualize_predictions.ipynb` | a trained run's predictions on a clip, rendered to MP4 |
+| `src/05_yolo.ipynb` | YOLO11 / YOLO26 fine-tuning (Ultralytics), scored with the shared evaluator, compared with 02/04 |
+| `src/run_queue.py` | runs a notebook's experiments unattended: `../../.venv/bin/python run_queue.py 02_faster_rcnn.ipynb:exp1,exp2` |
 | `src/common/evaluate.py` | **the evaluator: every reported number comes from it** |
 | `src/common/engine.py` | shared train/validate loop: `run_experiment(name, cfg, build_fn, protocol, paths, device, family)` |
 | `src/common/analysis.py` | failure analysis (per-frame errors, worst frames, miss rates, confusions) |
@@ -48,6 +50,7 @@ Every model is compared under the same protocol. Changing any item invalidates c
 
 ## Working with the user's machine
 
+- **Environment:** the venv is managed with uv and lives two levels above `src/` (`../../.venv`); install packages with `uv pip install`.
 - **Hardware:** a 14 GB RAM Linux machine with an AMD GPU (ROCm); one epoch takes about 5 min. Data loaders keep images as uint8 until `to_model_input` moves them to the GPU, with 2 workers. More workers, or float images on the CPU, triggered an out-of-memory kill that took VS Code down with it.
 - **Editor overwrites:** VS Code saves its open copy over files changed from outside the editor. Ask the user to close a notebook's tab before editing it, then to reload it ("File: Revert File") and restart the kernel. After writing, re-read the file from disk to confirm the change stuck.
 - **Testing:** notebooks are verified on CPU with a tiny fixture (a few val frames, random weights, reduced size and epochs) before they reach the user's GPU.
@@ -61,7 +64,7 @@ Every model is compared under the same protocol. Changing any item invalidates c
   - keep boxes under 2 px in `gt_eval`.
 - **Kaggle:** a baseline `submission.csv` exists under `runs/faster_rcnn/baseline/`; whether it was uploaded is unknown.
 
-## Next task: `src/05_preprocessing_ablations.ipynb`
+## Next task: `src/06_preprocessing_ablations.ipynb`
 
 Test the ideas in `docs/preprocessing_improvements.md` against the Faster R-CNN baseline, keeping each variant as small as possible.
 
