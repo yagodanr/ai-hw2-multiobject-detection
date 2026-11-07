@@ -1,2 +1,15 @@
 multiple-object-video-detection-hw-2-ucu-ai-2026/
 multiple-object-video-detection-hw-2-ucu-ai-2026.zip
+
+# Generated data and artefacts (large; reproducible from the notebooks)
+data_processed/
+outputs/
+runs/**/*.pt
+runs/**/val_dets.json
+runs/**/submission.csv
+runs/*.log
+runs/*.csv
+
+# Python / Jupyter
+__pycache__/
+.ipynb_checkpoints/

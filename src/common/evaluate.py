@@ -78,6 +78,8 @@ def to_coco_detections(outputs, image_ids):
         scores = out["scores"].detach().cpu().numpy()
         labels = out["labels"].detach().cpu().numpy()
         for (x1, y1, x2, y2), s, c in zip(boxes, scores, labels):
+            if c < 1:   # 0 = background slot (RetinaNet can emit it with a near-zero score)
+                continue
             dets.append({"image_id": int(img_id), "category_id": int(c),
                          "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)], "score": float(s)})
     return dets
