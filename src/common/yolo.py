@@ -172,7 +172,7 @@ def score_checkpoints(run_dir, model_cls, items, gt_file, pred_kw, every=1, keep
 def train_and_score(name, cfg, protocol, data_yaml, runs_dir, gt_file, data_root, model_cls=None):
     """Train one experiment with Ultralytics, then score it with the shared evaluator.
 
-    cfg: {"model": yaml or .pt, "weights": optional .pt to transfer into a yaml model, "imgsz": int, "batch": optional override,
+    cfg: {"model": yaml or .pt, "weights": optional .pt to transfer into a yaml model, "imgsz": int, "batch"/"epochs": optional overrides,
           "train": {extra Ultralytics train args}, "predict": {extra predict args, e.g. nms}}.
     protocol: {"epochs", "batch", "train": {shared Ultralytics train args}, "predict": {...}, "score_every",
                "val_max_images"}.
@@ -188,7 +188,8 @@ def train_and_score(name, cfg, protocol, data_yaml, runs_dir, gt_file, data_root
         model.load(cfg["weights"])           # transfers every layer whose name and shape match
     train_args = {**protocol["train"], **cfg.get("train", {})}
     model.train(data=str(data_yaml), project=str(runs_dir), name=name, exist_ok=True,
-                imgsz=cfg["imgsz"], epochs=protocol["epochs"], batch=cfg.get("batch", protocol["batch"]),
+                imgsz=cfg["imgsz"], epochs=cfg.get("epochs", protocol["epochs"]),
+                batch=cfg.get("batch", protocol["batch"]),
                 **train_args)
     train_minutes = (time.time() - t0) / 60
     del model
