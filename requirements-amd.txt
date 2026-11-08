@@ -1,0 +1,29 @@
+# AMD GPU environment (ROCm 10, RX 6800 XT = gfx1030). Python 3.11.
+# Install:  uv pip install -r requirements-amd.txt
+# torch/torchvision must come from AMD's ROCm package index, not PyPI.
+# TODO: add the index used for the current venv, e.g.  --extra-index-url <ROCm wheel index for gfx103X>
+
+# Deep learning (ROCm builds)
+torch==2.13.0+rocm10.0.0
+torchvision==0.28.0+rocm10.0.0
+amd-torch-device-gfx1030==2.13.0+rocm10.0.0
+amd-torchvision-device-gfx1030==0.28.0+rocm10.0.0
+rocm==10.0.0
+rocm-sdk-device-gfx1030==10.0.0
+
+# Data, augmentation, evaluation
+numpy==2.4.6
+pandas==3.1.1
+opencv-python-headless==5.0.0.93   # one OpenCV only: opencv-python and -headless both provide cv2 and conflict
+albumentations==2.0.8
+pycocotools==2.0.11
+
+# Plots, videos, progress
+matplotlib==3.11.2
+imageio==2.38.1
+imageio-ffmpeg==0.8.1
+tqdm==4.70.1
+
+# Notebooks and submissions
+ipykernel==7.4.0
+kaggle==2.2.5
