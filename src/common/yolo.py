@@ -114,10 +114,9 @@ def measure_fps(model, paths, imgsz, device=None, warmup=5):
 
 def _epoch_checkpoints(weights_dir):
     """{epoch (1-based, as in results.csv): path} for Ultralytics' epoch<k>.pt files."""
-    found = {int(re.fullmatch(r"epoch(\d+)\.pt", f.name).group(1)): f
+    # Ultralytics names them by its 0-based epoch counter: epoch0.pt is the end of epoch 1
+    found = {int(re.fullmatch(r"epoch(\d+)\.pt", f.name).group(1)) + 1: f
              for f in Path(weights_dir).glob("epoch*.pt") if re.fullmatch(r"epoch(\d+)\.pt", f.name)}
-    if found and min(found) == 0:          # older Ultralytics numbered epochs from 0
-        found = {k + 1: v for k, v in found.items()}
     return dict(sorted(found.items()))
 
 
@@ -126,19 +125,20 @@ def score_checkpoints(run_dir, model_cls, items, gt_file, pred_kw, every=1, keep
 
     The best epoch's checkpoint is copied to <run_dir>/best.pt (optimizer stripped).
 
-    The last epoch is always scored. Rows merge our metrics with Ultralytics' results.csv (losses, its own mAP
+    Every saved epoch (save_period) plus the final one (last.pt) is scored. Rows merge our metrics with Ultralytics' results.csv (losses, its own mAP
     on the grey val, cumulative time) so the per-epoch curve sits next to the CNNs' history.json.
     """
     run_dir = Path(run_dir)
     ckpts = _epoch_checkpoints(run_dir / "weights")
-    if not ckpts:                            # save_period disabled: fall back to last.pt
-        ckpts = {None: run_dir / "weights" / "last.pt"}
-    last = max(k for k in ckpts if k is not None) if any(k is not None for k in ckpts) else None
-    todo = {k: p for k, p in ckpts.items() if k is None or k == last or k % every == 0}
-
     results = pd.read_csv(run_dir / "results.csv") if (run_dir / "results.csv").exists() else None
     if results is not None:
         results.columns = [c.strip() for c in results.columns]
+    # The final epoch is always scored: with save_period > 1 it is usually only in last.pt
+    final = int(results["epoch"].max()) if results is not None and len(results) else None
+    if final not in ckpts:
+        ckpts[final] = run_dir / "weights" / "last.pt"
+    ckpts = dict(sorted(ckpts.items(), key=lambda kv: (kv[0] is None, kv[0] or 0)))
+    todo = {k: p for k, p in ckpts.items() if k is None or k == final or k % every == 0 or every == 1}
     image_ids = [i for i, _ in items]
 
     history, best, best_dets, best_ckpt = [], None, None, None
@@ -162,9 +162,9 @@ def score_checkpoints(run_dir, model_cls, items, gt_file, pred_kw, every=1, keep
         strip_optimizer(run_dir / "best.pt")       # inference-only copy, ~half the size
     except Exception as e:                          # stripping is a nicety; never lose a finished run over it
         print("strip_optimizer failed:", e)
-    if not keep_epoch_ckpts:
-        for k, p in ckpts.items():
-            if k is not None:
+    if not keep_epoch_ckpts:                        # only epoch<k>.pt; Ultralytics' last.pt / best.pt stay
+        for p in ckpts.values():
+            if re.fullmatch(r"epoch(\d+)\.pt", p.name):
                 p.unlink(missing_ok=True)
     return history, best, best_dets
 

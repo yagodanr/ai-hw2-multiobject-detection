@@ -1,8 +1,10 @@
 """Run the RT-DETR experiments unattended on Kaggle ("Save & Run All").
 
-Kaggle notebook cell:
+Kaggle notebook cell (experiment names optional; without them, GPU_QUEUES below):
     import glob, subprocess
-    subprocess.run(["python", glob.glob("/kaggle/input/**/src/kaggle_launch.py", recursive=True)[0]], check=True)
+    launcher = [p for d in range(1, 6) for p in glob.glob("/kaggle/input/" + "*/" * d + "src/kaggle_launch.py")][0]
+    subprocess.run(["python", launcher, "final_960", "final_960_s025"], check=True)
+Names are spread over the GPUs in turn (first name on GPU 0, second on GPU 1, third on GPU 0, ...).
 
 - Finds the competition data (folder with test_images.csv) and our uploaded dataset (data_processed/ + src/) under /kaggle/input.
 - Copies src/ to /kaggle/working/src (writable), installs Ultralytics, writes results to /kaggle/working/runs/rtdetr/.
@@ -48,7 +50,7 @@ def find_dir(marker, max_depth=5):
 def main():
     data_root = find_dir("test_images.csv")
     proc_root = find_dir("gt_eval_coco.json").parent       # .../data_processed/val -> .../data_processed
-    src_in = find_dir("kaggle_launch.py")
+    src_in = Path(__file__).resolve().parent              # the src/ this launcher came from (several uploads may exist)
     log(f"competition data: {data_root}\nprocessed data: {proc_root}\nsrc: {src_in}")
 
     src = WORK / "src"
@@ -62,7 +64,12 @@ def main():
     log(f"{n_gpu} GPU(s)")
     if n_gpu == 0 and not os.environ.get("ALLOW_CPU"):          # ALLOW_CPU=1: local smoke test only
         raise SystemExit("No GPU: set Accelerator to 'GPU T4 x2' in the notebook settings.")
-    queues = GPU_QUEUES if n_gpu >= 2 else [sum(GPU_QUEUES, [])]
+    names = sys.argv[1:]
+    if names:
+        k = min(max(n_gpu, 1), len(names))
+        queues = [names[i::k] for i in range(k)]
+    else:
+        queues = GPU_QUEUES if n_gpu >= 2 else [sum(GPU_QUEUES, [])]
     n_gpu = max(n_gpu, 1)
 
     cpus = os.cpu_count() or 4
