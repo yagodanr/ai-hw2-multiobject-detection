@@ -9,6 +9,16 @@ Steps (a simplified Seq-NMS, Han et al., 2016):
      `single_penalty` (isolated detections are more often false positives).
 mAP depends only on the ranking of detections, so rescoring can lift weak but consistent detections above flickering ones.
 
+Version 2 (`temporal_v2`, compared in experiments/temporal_v2.ipynb) adds four switches on top, all post-processing:
+  - motion: compensate the drone's camera motion. A homography between consecutive frames (corner points tracked with
+    Lucas-Kanade optical flow, RANSAC) moves the previous boxes into the current frame before matching.
+  - center_dist: also link boxes whose centres are close relative to their size, not only by IoU (a 10 px object moving
+    6 px has almost no IoU with itself; idea from REPP, Sabater et al., 2020).
+  - max_gap / fill: let a track skip up to max_gap frames, and insert the missing boxes (lower score) so missed objects
+    come back. Plain rescoring only re-ranks boxes; filling can raise recall.
+  - smooth_sigma: Gaussian smoothing of box coordinates along each track (REPP's re-coordinating).
+With all switches off, temporal_v2 gives exactly the version 1 result.
+
 Usage (from src/). Inputs come from infer.py (raw detections for every val frame and for the test set):
     python infer.py --run ../runs/faster_rcnn/baseline --split valall --scales 720:1280,1080:1920 --val-res test --tag ms
     python infer.py --run ../runs/faster_rcnn/baseline --split test   --scales 720:1280,1080:1920 --tag ms
@@ -92,6 +102,189 @@ def rescore(dets, track, lam, top_k, min_len, single_penalty):
 
 def with_scores(dets, scores):
     return [{**d, "score": float(s)} for d, s in zip(dets, scores)]
+
+
+# ---------------------------------------------------------------- version 2
+
+
+def estimate_homographies(frames, long_side=960, max_corners=1500):
+    """{(video, frame): H} mapping pixel coordinates of frame-1 to frame, for every frame whose predecessor exists.
+
+    frames: dicts with "video", "frame", "path" (any order). Points are tracked on a grayscale copy shrunk to
+    `long_side`, and H is rescaled to original pixels. Fewer than 20 tracked points or a failed fit -> identity.
+    """
+    import cv2
+
+    by_video = defaultdict(dict)
+    for f in frames:
+        by_video[f["video"]][f["frame"]] = f["path"]
+    out = {}
+    for video, paths in by_video.items():
+        prev_gray, prev_idx, s = None, None, 1.0
+        for idx in sorted(paths):
+            img = cv2.imread(str(paths[idx]), cv2.IMREAD_GRAYSCALE)
+            if img is None:   # unreadable frame: no homography to or from it
+                prev_gray = None
+                continue
+            s = min(1.0, long_side / max(img.shape))
+            gray = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1 else img
+            if prev_gray is not None and prev_idx == idx - 1:
+                H = np.eye(3)
+                p0 = cv2.goodFeaturesToTrack(prev_gray, max_corners, 0.01, 8)
+                if p0 is not None and len(p0) >= 20:
+                    p1, st, _ = cv2.calcOpticalFlowPyrLK(prev_gray, gray, p0, None, winSize=(21, 21), maxLevel=3)
+                    ok = st.ravel() == 1
+                    if ok.sum() >= 20:
+                        Hs, _ = cv2.findHomography(p0[ok], p1[ok], cv2.RANSAC, 3.0)
+                        if Hs is not None:
+                            S = np.diag([s, s, 1.0])
+                            H = np.linalg.inv(S) @ Hs @ S   # back to original pixels
+                out[(video, idx)] = H
+            prev_gray, prev_idx = gray, idx
+    return out
+
+
+def warp_boxes(boxes, H):
+    """Axis-aligned boxes [x, y, w, h] (N, 4) moved by homography H (the bounding box of the 4 warped corners)."""
+    if H is None or len(boxes) == 0:
+        return boxes
+    x, y, w, h = boxes.T
+    corners = np.stack([np.stack([x, y], 1), np.stack([x + w, y], 1), np.stack([x, y + h], 1),
+                        np.stack([x + w, y + h], 1)], 1).reshape(-1, 2)
+    pts = np.c_[corners, np.ones(len(corners))] @ H.T
+    pts = (pts[:, :2] / pts[:, 2:3]).reshape(-1, 4, 2)
+    x0, y0 = pts[..., 0].min(1), pts[..., 1].min(1)
+    return np.stack([x0, y0, pts[..., 0].max(1) - x0, pts[..., 1].max(1) - y0], 1)
+
+
+def _chain(homs, video, a, b):
+    """Homography from frame a to frame b (a < b) as the product of the per-frame ones; identity where unknown."""
+    H = np.eye(3)
+    for g in range(a + 1, b + 1):
+        H = homs.get((video, g), np.eye(3)) @ H
+    return H
+
+
+def link_tracks_v2(dets, link_iou, link_min, homs=None, center_dist=None, max_gap=0):
+    """Track id per detection (-1 = not linked), plus the gaps to fill: [(track, frame_from, frame_to)].
+
+    Same greedy frame-by-frame linking as link_tracks, with three options: previous boxes are moved by the camera
+    motion first (homs), boxes may also link by centre distance / size (center_dist), and a track may skip up to
+    max_gap frames. With homs=None, center_dist=None, max_gap=0 the result equals link_tracks.
+    """
+    track = np.full(len(dets), -1)
+    gaps = []
+    by_key = defaultdict(list)
+    for i, d in enumerate(dets):
+        if d["score"] >= link_min:
+            by_key[(d["video"], d["category_id"])].append(i)
+    next_id = 0
+    for (video, _), idx in by_key.items():
+        by_frame = defaultdict(list)
+        for i in idx:
+            by_frame[dets[i]["frame"]].append(i)
+        last = {}   # track id -> (frame, detection index) of its latest box
+        for f in sorted(by_frame):
+            cur = by_frame[f]
+            cands = [(t, lf, li) for t, (lf, li) in last.items() if f - lf <= 1 + max_gap]
+            assigned = {}
+            if cands:
+                prev = np.array([dets[li]["bbox"] for _, _, li in cands], dtype=float)
+                if homs is not None:
+                    prev = np.concatenate([warp_boxes(prev[k:k + 1], _chain(homs, video, lf, f))
+                                           for k, (_, lf, _) in enumerate(cands)])
+                curb = np.array([dets[i]["bbox"] for i in cur], dtype=float)
+                iou = iou_matrix(prev, curb)
+                ok = iou >= link_iou
+                key = iou.copy()
+                if center_dist is not None:
+                    cp = prev[:, :2] + prev[:, 2:] / 2
+                    cc = curb[:, :2] + curb[:, 2:] / 2
+                    size = np.sqrt((np.sqrt(prev[:, 2] * prev[:, 3])[:, None] * np.sqrt(curb[:, 2] * curb[:, 3])[None]))
+                    dist = np.linalg.norm(cp[:, None] - cc[None], axis=2) / (size + 1e-9)
+                    area_ratio = (prev[:, 2] * prev[:, 3])[:, None] / (curb[:, 2] * curb[:, 3] + 1e-9)[None]
+                    near = (dist <= center_dist) & (area_ratio > 0.25) & (area_ratio < 4)
+                    # IoU matches first (key >= link_iou), then centre-distance matches ranked by closeness (key < link_iou)
+                    key = np.where(ok, iou, np.where(near, link_iou * (1 - dist / (center_dist + 1e-9)) * 0.999, 0))
+                    ok = ok | near
+                if max_gap:
+                    key = key - 1e-3 * np.array([f - lf - 1 for _, lf, _ in cands])[:, None]   # prefer recent tracks
+                pairs = np.argwhere(ok)
+                pairs = pairs[np.argsort(-key[pairs[:, 0], pairs[:, 1]], kind="stable")]
+                used_p, used_c = set(), set()
+                for p, c in pairs:
+                    if p in used_p or c in used_c:
+                        continue
+                    used_p.add(p); used_c.add(c)
+                    assigned[c] = p
+            for c, i in enumerate(cur):
+                if c in assigned:
+                    t, lf, _ = cands[assigned[c]]
+                    if f - lf > 1:
+                        gaps.append((t, lf, f))
+                else:
+                    t = next_id
+                    next_id += 1
+                track[i] = t
+                last[t] = (f, i)
+    return track, gaps
+
+
+def smooth_boxes(dets, track, sigma):
+    """Gaussian smoothing (over frames, sigma in frames) of each linked track's box coordinates. Returns new bboxes."""
+    boxes = np.array([d["bbox"] for d in dets], dtype=float)
+    if not sigma:
+        return boxes
+    members = defaultdict(list)
+    for i, t in enumerate(track):
+        if t >= 0:
+            members[t].append(i)
+    out = boxes.copy()
+    for idx in members.values():
+        if len(idx) < 2:
+            continue
+        idx = sorted(idx, key=lambda i: dets[i]["frame"])
+        fr = np.array([dets[i]["frame"] for i in idx], dtype=float)
+        w = np.exp(-0.5 * ((fr[:, None] - fr[None]) / sigma) ** 2)
+        w /= w.sum(1, keepdims=True)
+        out[idx] = w @ boxes[idx]
+    return out
+
+
+def temporal_v2(dets, homs=None, link_iou=0.5, link_min=0.05, lam=0.7, top_k=15, min_len=3, single_penalty=1.0,
+                motion=False, center_dist=None, max_gap=0, fill=False, fill_decay=0.5, smooth_sigma=0.0,
+                frame_ids=None):
+    """Version 2 of the rescoring; returns a new detection list (rescored, optionally smoothed, plus filled boxes).
+
+    homs: from estimate_homographies (needed when motion=True). frame_ids: {(video, frame): image_id}, needed for
+    fill=True (a filled box needs the image id of the frame it is inserted in).
+    """
+    track, gaps = link_tracks_v2(dets, link_iou, link_min, homs if motion else None, center_dist, max_gap)
+    scores = rescore(dets, track, lam, top_k, min_len, single_penalty)
+    boxes = smooth_boxes(dets, track, smooth_sigma)
+    out = [{**d, "score": float(s), "bbox": [float(v) for v in b]} for d, s, b in zip(dets, scores, boxes)]
+    if fill and gaps:
+        length = np.bincount(track[track >= 0])
+        by_track_frame = {(t, dets[i]["frame"]): i for i, t in enumerate(track) if t >= 0}
+        for t, f0, f1 in gaps:
+            if length[t] < min_len:
+                continue
+            i0, i1 = by_track_frame[(t, f0)], by_track_frame[(t, f1)]
+            d0 = dets[i0]
+            video = d0["video"]
+            b0, b1 = boxes[i0:i0 + 1], boxes[i1:i1 + 1]
+            for g in range(f0 + 1, f1):
+                if (video, g) not in frame_ids:
+                    continue
+                a = (g - f0) / (f1 - f0)
+                # both ends moved into frame g, then interpolated
+                fwd = warp_boxes(b0, _chain(homs, video, f0, g)) if motion else b0
+                bwd = warp_boxes(b1, np.linalg.inv(_chain(homs, video, g, f1))) if motion else b1
+                b = ((1 - a) * fwd + a * bwd)[0]
+                out.append({"image_id": frame_ids[(video, g)], "video": video, "frame": g,
+                            "category_id": d0["category_id"], "bbox": [float(v) for v in b],
+                            "score": float(fill_decay * min(scores[i0], scores[i1])), "filled": True})
+    return out
 
 
 def main():

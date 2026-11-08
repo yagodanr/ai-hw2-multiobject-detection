@@ -14,6 +14,7 @@ opencv-python-headless==5.0.0.93   # one OpenCV only: opencv-python and -headles
 albumentations==2.0.8
 pycocotools==2.0.11
 ultralytics==8.4.207             # YOLO26 and RT-DETR (Person B)
+ensemble-boxes==1.0.10           # weighted box fusion (09_final_pipeline, experiments/ensemble_temporal)
 
 # Plots, videos, progress
 matplotlib==3.11.2
