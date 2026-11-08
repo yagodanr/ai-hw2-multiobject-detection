@@ -12,12 +12,18 @@ Examples (from src/, after training has finished: never while another job uses t
     # multi-scale TTA: training scale + 1.5x, merged with NMS; optionally only small boxes from the 1.5x pass
     python infer.py --run ../runs/faster_rcnn/anchors_3scale --scales 720:1280,1080:1920 --tag ms
     python infer.py --run ../runs/faster_rcnn/anchors_3scale --scales 720:1280,1080:1920 --hi-max-box 48 --tag ms_small
+    # more RPN proposals at inference (dense test frames; 9-anchor models spread the default 1000 thinly)
+    python infer.py --run ../runs/faster_rcnn/anchors_3scale --rpn-proposals 3000 --val-res test --tag rpn3000_testres
+    # every val frame (not only the labelled ones) and the test set, with raw detections saved for temporal.py
+    python infer.py --run ../runs/faster_rcnn/baseline --split valall --scales 720:1280,1080:1920 --val-res test --tag ms
+    python infer.py --run ../runs/faster_rcnn/baseline --split test --scales 720:1280,1080:1920 --tag ms
     # test-like validation: each val clip shrunk to a long side from the test resolution mix (use this to rank models)
     python infer.py --run ../runs/faster_rcnn/baseline --val-res test --tag plain_testres
     # test set -> submission CSV (same options)
     python infer.py --run ../runs/faster_rcnn/anchors_3scale --split test --tag plain
 
 Val results are appended to ../runs/inference_results.csv; test submissions go to <run>/submissions/<tag>.csv.
+Raw detections are saved to <run>/inference/<tag>_<split>_dets.json (input for temporal.py).
 """
 import argparse
 import json
@@ -135,7 +141,10 @@ def downscale(img, long_side):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--run", required=True, help="run folder with summary.json and best.pt")
-    p.add_argument("--split", choices=["val", "test"], default="val")
+    p.add_argument("--split", choices=["val", "valall", "test"], default="val",
+                   help="val: labelled val frames; valall: every val frame (for temporal.py, scored on the labelled ones)")
+    p.add_argument("--rpn-proposals", type=int, default=None,
+                   help="RPN proposals kept per image at inference (default: the run's setting, usually 1000)")
     p.add_argument("--tag", required=True, help="name for this inference setting")
     p.add_argument("--min-size", type=int, default=720)
     p.add_argument("--max-size", type=int, default=1280)
@@ -160,33 +169,54 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run = Path(args.run)
     model = load_faster_rcnn_run(run, device)
+    if args.rpn_proposals:
+        model.rpn._pre_nms_top_n["testing"] = max(model.rpn._pre_nms_top_n["testing"], args.rpn_proposals)
+        model.rpn._post_nms_top_n["testing"] = args.rpn_proposals
     data_root, gt_file = Path(args.data_root), Path(args.proc_root) / "val" / "gt_eval_coco.json"
     t0 = time.time()
 
-    if args.split == "val":
-        ds = CocoDetection(gt_file, data_root)
-        if args.val_res == "test":
-            long_sides = test_like_long_sides(ds.images, data_root / "test_images.csv")
+    if args.split in ("val", "valall"):
+        gt_images = json.loads(gt_file.read_text())["images"]
+        frames = gt_images if args.split == "val" else \
+            json.loads((data_root / "val" / "annotations_coco.json").read_text())["images"]
+        frames = [{"image_id": im["id"], "video": im["video"], "frame": im["frame_id"],
+                   "path": data_root / (im["file_name"] if args.split == "val" else Path("val") / im["file_name"])}
+                  for im in frames]
+        labelled = {im["id"] for im in gt_images}
+        long_sides = test_like_long_sides(gt_images, data_root / "test_images.csv") if args.val_res == "test" else None
+        if long_sides:
             print("val clip -> test-like long side:", long_sides)
-        dets = []
-        for i in tqdm(range(len(ds)), desc=f"val {args.tag}"):
-            img, tgt = ds[i]
-            scale = 1.0
-            if args.val_res != "native":
-                target = long_sides[ds.images[i]["video"]] if args.val_res == "test" else int(args.val_res)
-                img, scale = downscale(img, target)
-            b, s, c = predict_image(model, img, args, device)
-            b = b / scale   # boxes back to original-image pixels, so the ground truth stays untouched
-            dets += [{"image_id": tgt["image_id"], "category_id": int(ci), "score": float(si),
-                      "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)]}
-                     for (x1, y1, x2, y2), si, ci in zip(b.tolist(), s.tolist(), c.tolist())]
-        seconds = (time.time() - t0) / len(ds)
-        metrics = evaluate_detections(gt_file, dets)
-        out_dir = run / "inference"
-        out_dir.mkdir(exist_ok=True)
-        (out_dir / f"{args.tag}_val_dets.json").write_text(json.dumps(dets))
-        row = {"run": run.name, "tag": args.tag, "val_res": args.val_res, **{k: v for k, v in vars(args).items() if k in
-               ["min_size", "max_size", "slice", "overlap", "slice_scale", "full_pass", "nms", "hi_max_box"]},
+    else:
+        test = pd.read_csv(data_root / "test_images.csv")
+        frames = [{"image_id": k, "video": c, "frame": int(f), "path": data_root / p}
+                  for k, c, f, p in zip(test["image_id"], test["clip"], test["frame"], test["file_name"])]
+
+    loader = ImageList([f["path"] for f in frames], list(range(len(frames))))
+    dets, preds = [], {}
+    for i in tqdm(range(len(frames)), desc=f"{args.split} {args.tag}"):
+        img, _ = loader[i]
+        fr = frames[i]
+        scale = 1.0
+        if args.split != "test" and args.val_res != "native":
+            target = long_sides[fr["video"]] if args.val_res == "test" else int(args.val_res)
+            img, scale = downscale(img, target)
+        b, s, c = predict_image(model, img, args, device)
+        b = b / scale   # boxes back to original-image pixels, so the ground truth stays untouched
+        for (x1, y1, x2, y2), si, ci in zip(b.tolist(), s.tolist(), c.tolist()):
+            dets.append({"image_id": fr["image_id"], "video": fr["video"], "frame": fr["frame"],
+                         "category_id": int(ci), "score": float(si),
+                         "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)]})
+    seconds = (time.time() - t0) / len(frames)
+    out_dir = run / "inference"
+    out_dir.mkdir(exist_ok=True)
+    (out_dir / f"{args.tag}_{args.split}_dets.json").write_text(json.dumps(dets))
+
+    if args.split in ("val", "valall"):
+        metrics = evaluate_detections(gt_file, [d for d in dets if d["image_id"] in labelled])
+        row = {"run": run.name, "tag": args.tag, "split": args.split, "val_res": args.val_res,
+               **{k: v for k, v in vars(args).items() if k in
+                  ["min_size", "max_size", "slice", "overlap", "slice_scale", "full_pass", "nms", "hi_max_box",
+                   "rpn_proposals"]},
                "scales": " ".join(f"{a}:{b}" for a, b in args.scales) if args.scales else "",
                "sec_per_image": seconds, **metrics}
         csv = ROOT / "runs" / "inference_results.csv"
@@ -195,14 +225,9 @@ def main():
         print(f"{run.name}/{args.tag}: mAP {metrics['mAP']:.4f} AP50 {metrics['AP50']:.4f} "
               f"AP_small {metrics['AP_small']:.4f} AP_medium {metrics['AP_medium']:.4f} | {seconds:.2f} s/image")
     else:
-        test = pd.read_csv(data_root / "test_images.csv")
-        ds = ImageList([data_root / f for f in test["file_name"]], test["image_id"])
-        preds = {}
-        for i in tqdm(range(len(ds)), desc=f"test {args.tag}"):
-            img, key = ds[i]
-            b, s, c = predict_image(model, img, args, device)
-            preds[key] = [(int(ci) - 1, float(si), x1, y1, x2 - x1, y2 - y1)
-                          for (x1, y1, x2, y2), si, ci in zip(b.tolist(), s.tolist(), c.tolist())]
+        for d in dets:
+            x, y, w, h = d["bbox"]
+            preds.setdefault(d["image_id"], []).append((d["category_id"] - 1, d["score"], x, y, w, h))
         out = run / "submissions" / f"{args.tag}.csv"
         out.parent.mkdir(exist_ok=True)
         sub = write_submission(preds, data_root / "test_images.csv", out)

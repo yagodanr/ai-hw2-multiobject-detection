@@ -3,6 +3,7 @@
 Detections with score >= score_thr are matched greedily (highest score first) to ground truth of the same
 class at IoU >= 0.5. Every detection is then one of:
   tp           matched an object of its class
+  duplicate    overlaps (IoU >= 0.5) an already-matched object of its class
   wrong_class  overlaps (IoU >= 0.5) an object of another class
   ignored      lies mostly (>= 50%) inside an ignored region, so it is not scored
   fp           anything else
@@ -74,6 +75,8 @@ def frame_errors(gt, dets_by_img, img_id, score_thr):
         if len(same) and same.max() >= 0.5:
             matched[same.argmax()] = True
             status.append("tp")
+        elif len(objs) and np.where(det_cls[i] == gt_cls, iou[i], 0).max() >= 0.5:
+            status.append("duplicate")        # a second box on an object of its class that is already matched
         elif len(objs) and iou[i].max() >= 0.5:
             status.append("wrong_class")
         else:
@@ -96,7 +99,7 @@ def error_table(gt, dets, score_thr):
         e = frame_errors(gt, by_img, img_id, score_thr)
         rows.append({"image_id": img_id, "video": info["video"], "n_gt": len(e["gt_cls"]),
                      "missed": int((~e["matched"]).sum()), "fp": e["status"].count("fp"),
-                     "wrong_class": e["status"].count("wrong_class")})
+                     "duplicate": e["status"].count("duplicate"), "wrong_class": e["status"].count("wrong_class")})
     return pd.DataFrame(rows)
 
 
