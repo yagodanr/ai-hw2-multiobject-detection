@@ -17,20 +17,13 @@ HOW TO USE THIS TEMPLATE
 
 ## 1. Task and data
 
-<!--
-[A] ~150 words. Answer:
-- What is the task (8 classes, drone video, Kaggle metric) and what makes it hard? Pick the 2–3 reasons that drove your decisions.
-- How did you split and sample the data, and why (clip-level split, frame step 8 and the IoU <= 0.5 rule)?
-- How are ignored regions handled in training vs in scoring?
-- How does test differ from val? Refer to the table below; say what you concluded from it.
--->
 The task is to detect objects of 8 classes in drone video clips of different resolutions, where most objects are small. The small size makes the task difficult: there are fewer pixels per object, a bounding box error of a few pixels is more harmful, and the detections are harder to classify.
 
-The dataset consists of video clips with labeled bounding boxes, their classes, and ignored areas, where detections are not scored. Those ignored areas typically contain many objects too small to classify, so in preprocessing we fill them with grey rectangles. The test dataset does not have any ignored areas in it.
+The dataset consists of video clips with labeled bounding boxes, their classes, and ignored areas, where detections are not scored. Those ignored areas typically contain many objects too small to classify, so in preprocessing we fill them with grey rectangles. During training, we filled ignored regions with grey pixels and removed bounding boxes that overlapped these regions by more than 50%. During validation, we instead represented ignored regions as COCO crowd annotations for each class, so matching detections were not penalized as false positives.
 
-The dataset is split into train, validation and test clips by the organizers. As we saw in preprocessing, the splits differ in resolution: test is 680–1920 px wide and train 1344–2720 px, so test has smaller resolutions than train.
+The dataset is split into train, validation and test clips by the organizers. As we saw in preprocessing, the splits differ in resolution: test is 680–1920 px wide and train 1344–2720 px, so test has smaller resolutions than train. We also found that test frames contain a much higher proportion of small predicted boxes (57% under 32 px compared to 18% on validation), as well as more camera motion, blur and compression. These differences motivated our experiments with input resolution, smaller anchors and test-like augmentations.
 
-Each clip has little movement: the camera does not move rapidly, and most of the movement comes from moving objects. We addressed that by taking not every frame from the train dataset, but only every 8th one, because we wanted consecutive sampled frames to show noticeable movement of the bounding boxes. That shrinks the dataset, makes training faster and reduces overfitting.
+Each clip has little movement: the camera does not move rapidly, and most of the movement comes from moving objects. We addressed that by taking not every frame from the train dataset, but only every 8th one, because we wanted consecutive sampled frames to show noticeable movement of the bounding boxes. That shrinks the dataset, makes training faster (reduced the training dataset from 24,201 to 3,050 frames) and reduces overfitting. We compared the same objects across frames using IoU and chose step 8 as the smallest tested interval satisfying our overlap criterion (IoU ≤ 0.5). 
 
 | Property | Train / val | Test |
 |---|---|---|
@@ -40,13 +33,6 @@ Each clip has little movement: the camera does not move rapidly, and most of the
 | Camera motion, median shift per frame | ~1 px (val) | 2.4 px |
 
 ## 2. Validation design and its limits
-
-<!--
-[A] ~120 words. Answer:
-- What is the single evaluator and why does every number go through it (`common/evaluate.py`, 200 boxes, crowd boxes per class)?
-- What validation did you actually use (one fixed 7-clip split; test-like val for Faster R-CNN only; leave-one-clip-out only for the learned rescorer)?
-- Where did val and the leaderboard disagree, and what would you do differently? (Be honest: no CV, seed noise ~0.03 for 4-epoch YOLO.)
--->
 
 
 | Metric | Definition |
@@ -68,12 +54,6 @@ Each clip has little movement: the camera does not move rapidly, and most of the
 
 ### 3.1 Two-stage and anchor-based detectors
 
-<!--
-[A] ~120 words. Answer:
-- Why Faster R-CNN and RetinaNet as the anchor-based families? Which weights (COCO) and protocol (1280 px, 8 epochs, seed 42)?
-- What was your tuning strategy (one change per run against a baseline, then a combined "tuned" run)?
-- Which changes targeted small objects and why (anchor sizes from k-means in 05, RPN re-initialisation, RoI budget, GIoU, focal gamma)?
--->
 
 Anchor-based detectors have a fixed size anchors for bounding boxes and the model moves and stretches those anchors to fit the detection.
 
@@ -105,21 +85,11 @@ We tuned hyperparameters of the models one at a time to improve the inference on
 
 ### 3.2 Anchor-free and query-based detectors
 
-<!--
-[B] ~130 words. Answer:
-- Why YOLO26 and RT-DETR? Which sizes (s, m, L, X)?
-- What did the short 4-epoch runs test (input size, scale jitter, P2 head, mixup, denser frames, queries)?
-- Why 500 RT-DETR queries; why long schedules for RT-DETR but short for YOLO?
--->
+We chose YOLO26 as an anchor-free detector and RT-DETR as a query-based detector to compare them with the previous anchor-based models. YOLO predicts bounding boxes and classes directly without using predefined anchors. RT-DETR uses a transformer with object queries to detect objects. We experimented with YOLO26s, YOLO26m, RT-DETR-L and RT-DETR-X.
+
+We first ran short experiments with 4 epochs to test different input resolutions (640, 960 and 1280), scale augmentation, an additional P2 detection head for small objects, and the number of RT-DETR queries. We tested 500 queries because drone frames can contain many objects. We also experimented with mixup augmentation and using more training frames. After that, we trained selected models for more epochs to see whether their performance would improve. Longer training helped RT-DETR, while YOLO often reached its best validation performance earlier and started to overfit.
 
 ## 4. Single-model results
-
-<!--
-[A] fills the 02/04 rows and checks them; [B] fills the 07/08 rows. [B] writes ~70 words, [A] ~50 words under the table:
-- Which family is best overall, which on small objects, which on large ones? What does that suggest for an ensemble?
-- What did input resolution do?
-Native val, best epoch, no TTA unless marked.
--->
 
 | Family | Run (notebook) | mAP | AP50 | AP small | AP large |
 |---|---|---|---|---|---|
@@ -133,16 +103,14 @@ Native val, best epoch, no TTA unless marked.
 | RT-DETR-L | final_960_s025, 40 ep (`08`) | 0.2467 | 0.475 | 0.105 | 0.407 |
 | RT-DETR-L | final_1280 (`09`) | 0.2728 | 0.506 | 0.120 | 0.466 |
 
+RT-DETR-L achieved the highest overall mAP (0.2728) and performed best on large objects (AP large = 0.466). However, YOLO26m performed better on small objects, reaching AP small = 0.161 compared to 0.120 for RT-DETR-L. This showed that different models have different strengths, which motivated us to combine their predictions in an ensemble. We also observed that the RT-DETR configuration trained at 1280 px achieved higher mAP than the 960 px version (0.2728 vs 0.2467). However, other training settings also differed, so we cannot attribute this improvement to resolution alone.
+
 ## 5. Inference and ensembling
 
 ### 5.1 Test-time augmentation and model fusion
 
-<!--
-[B] ~150 words. Answer:
-- What did flip and tiles do per model, and why do you think tiles hurt?
-- How does WBF work in one or two sentences, and why WBF instead of NMS?
-- How did you choose the members and the IoU (family vs all models; 0.65)?
--->
+
+We experimented with different inference methods to improve detection without retraining the models. Horizontal flip augmentation improved the results, especially for RT-DETR, while dividing images into smaller tiles reduced mAP. We also combined predictions from multiple models using Weighted Box Fusion (WBF), which merges overlapping bounding boxes instead of simply removing duplicates as NMS does. We tested different combinations of models and IoU thresholds, with 0.65 giving the best results. Combining 7 models increased mAP to 0.2970, while using all 18 models improved it further to 0.3091.
 
 | Fusion (WBF IoU 0.65, val) | mAP | Notebook |
 |---|---|---|
@@ -153,12 +121,8 @@ Native val, best epoch, no TTA unless marked.
 
 ### 5.2 Additions to the fusion
 
-<!--
-[A] ~100 words. Answer:
-- Why did RetinaNet help the fusion but Faster R-CNN hurt it (look at AP75)?
-- What are size-aware weights and why one parameter p?
-- What did the Faster R-CNN "score-only vote" test, and what did the learned rescorer show under leave-one-clip-out?
--->
+
+We also experimented with adding Faster R-CNN and RetinaNet to the ensemble. RetinaNet slightly improved mAP, while Faster R-CNN reduced it when its bounding boxes were included in the fusion. We then tested size-aware weights, giving models different importance depending on their performance on small, medium and large objects. This improved mAP from 0.2998 to 0.3027. Adding two more models increased it to 0.3128. We also used Faster R-CNN only to adjust detection confidence scores without changing box coordinates, reaching 0.3138. Finally, we tried a learned rescorer, but it performed worse on validation.
 
 | Fusion (val, IoU 0.65) | mAP | Notebook |
 |---|---|---|
