@@ -133,13 +133,11 @@ We also experimented with adding Faster R-CNN and RetinaNet to the ensemble. Ret
 | Learned rescorer, leave-one-clip-out (vs 0.3027) | 0.2790 | `experiments/learned_rescorer` |
 
 ## 6. Temporal rescoring
+We developed two versions of temporal post-processing to improve detections using information from neighbouring video frames. The first version (v1) linked bounding boxes of the same class across consecutive frames using IoU ≥ 0.5 and adjusted their confidence scores based on the strongest detections in each track, without adding new boxes. This improved the 10-model ensemble mAP from 0.3138 to 0.3191.
 
-<!--
-[A] ~80 words + [B] 2 sentences. Answer:
-- [A] How does v1 link and rescore, and why can it raise mAP without adding boxes?
-- [A] What did each v2 switch do (motion compensation, centre distance, gap filling, smoothing)? When does temporal make things worse?
-- [B] How does temporal_rescore.py differ (support model, ±1 frame, a = 0.1)?
--->
+The second version (v2) extended this approach with camera motion compensation, centre-distance linking, gap filling and Gaussian box smoothing. We tested these modifications separately, and smoothing gave the best result, increasing mAP to 0.3210. However, temporal processing can also reinforce false detections if the same mistake appears across several frames.
+
+We also tested a separate, simpler approach in `temporal_rescore.py`, which uses RT-DETR predictions from the previous and next frames to adjust confidence scores with a weight of 0.1. This improved the 7-model ensemble from 0.2970 to 0.3002.
 
 | Input (val) | Without | With | Notebook |
 |---|---|---|---|
@@ -148,7 +146,6 @@ We also experimented with adding Faster R-CNN and RetinaNet to the ensemble. Ret
 | 10-member fusion, v1 / v2 (smoothing) | 0.3138 | 0.3191 / 0.3210 | `experiments/temporal_v2` |
 | B's 7 models, `temporal_rescore.py` | 0.2970 | 0.3002 | `09`, `temporal_rescore.py` |
 
-![One val frame without (left) and with (right) temporal rescoring](images/temporal_example.jpg)
 
 ## 7. Unsuccessful attempts
 
@@ -183,16 +180,28 @@ Fill the TODO scores from runs/kaggle_submissions.csv.
 
 ## 9. Final model and how to run it
 
-<!--
-Written by the owner of the chosen pipeline (TODO: decide by leaderboard); the other person follows the steps to check them. ~280 words.
-Include:
-- Which submission file is final, its members, fusion settings and temporal step.
-- Dependencies: Python version, requirements.txt / requirements-amd.txt (and the exact install command used for ROCm).
-- Data: where the competition data and data_processed/ must be.
-- Exact order of notebooks / scripts with commands, and roughly how long each takes on which GPU.
-- Seeds (42; note that RT-DETR runs are not bit-exact).
-- Where the final CSV appears.
--->
+Our final solution uses an ensemble of 18 detectors (11 YOLO26 and 7 RT-DETR models). The combination was selected using 09_final_pipeline.ipynb, achieving 0.3091 mAP on validation before temporal rescoring.
+
+Each model predicts on the original and horizontally flipped images, except one model that uses only the original. Predictions are combined using Weighted Box Fusion (WBF) with IoU = 0.65 and equal model weights. We then apply temporal rescoring using RT-DETR predictions from neighbouring frames, adjusting confidence scores without changing bounding boxes.
+
+The models were trained using 07_yolo.ipynb and 08_rtdetr.ipynb with different resolutions, augmentations and training durations. The best checkpoints were selected based on validation mAP.
+
+How to run:
+
+- install dependencies from requirements.txt
+
+- run src/01_preprocess.ipynb to prepare the dataset
+
+- run src/make_train_step.py with arguments 4 and 2 to generate additional training datasets
+
+- run src/07_yolo.ipynb and src/08_rtdetr.ipynb to train the models and save their best.pt weights
+
+- run src/09_final_pipeline.ipynb to evaluate model combinations and generate final_config.json
+
+- run src/ensemble_submission.py with the selected configuration to generate the ensemble predictions
+
+- run src/temporal_rescore.py with the ensemble submission and RT-DETR support predictions to generate the final CSV
+
 
 ## 10. Conclusions
 
