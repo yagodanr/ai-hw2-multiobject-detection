@@ -43,10 +43,26 @@ Each clip has little movement: the camera does not move rapidly, and most of the
 
 <!--
 [A] ~120 words. Answer:
-- What is the single evaluator and why does every number go through it (`common/evaluate.py`, 500 boxes, crowd boxes per class)?
+- What is the single evaluator and why does every number go through it (`common/evaluate.py`, 200 boxes, crowd boxes per class)?
 - What validation did you actually use (one fixed 7-clip split; test-like val for Faster R-CNN only; leave-one-clip-out only for the learned rescorer)?
 - Where did val and the leaderboard disagree, and what would you do differently? (Be honest: no CV, seed noise ~0.03 for 4-epoch YOLO.)
 -->
+
+
+| Metric | Definition |
+|---|---|
+| IoU | Overlap of a predicted and a true box: intersection area / union area |
+| Precision | Share of predicted boxes that match a true box |
+| Recall | Share of true boxes that are matched by a prediction |
+| AP | Area under the precision–recall curve for one class at one IoU threshold, with predictions sorted by score |
+| mAP@[.5:.95] (Kaggle metric) | AP averaged over IoU thresholds 0.50, 0.55, …, 0.95 and over the 8 classes |
+| AP50 / AP75 | AP at a single IoU threshold of 0.5 / 0.75, averaged over classes |
+| AP small / medium / large | mAP@[.5:.95] over objects with area < 32², 32²–96², > 96² px in the original frame |
+| AR | Recall averaged over the IoU thresholds, with up to 200 boxes per image |
+| Per-class AP | mAP@[.5:.95] for one class |
+
+
+
 
 ## 3. Models and tuning strategy
 
@@ -58,6 +74,34 @@ Each clip has little movement: the camera does not move rapidly, and most of the
 - What was your tuning strategy (one change per run against a baseline, then a combined "tuned" run)?
 - Which changes targeted small objects and why (anchor sizes from k-means in 05, RPN re-initialisation, RoI budget, GIoU, focal gamma)?
 -->
+
+Anchor-based detectors have a fixed size anchors for bounding boxes and the model moves and stretches those anchors to fit the detection.
+
+We chose Faster R-CNN and RetinaNet as examples of two-stage and one-stage anchor-based detectors. RetinaNet does fitting the bounding boxes and classification in one step, making it faster, but less acurate. Faster R-CNN works in 2 stages. First Region Proposal Network suggests the bounding box by classifying every anchor as "object" or "background", then that anchor is classified as either of the label classes.
+
+We tuned hyperparameters of the models one at a time to improve the inference on small objects.
+
+**Faster R-CNN** (ResNet-50 FPN, COCO weights). Code: `src/02_faster_rcnn.ipynb`; anchor sizes from `src/05_anchor_kmeans.ipynb`; results in `runs/faster_rcnn/<run>/summary.json`.
+
+| Run | Change vs baseline | Best epoch | mAP | AP50 | AP75 | AP small |
+|---|---|---|---|---|---|---|
+| baseline | anchors 32–512, one size per FPN level | 8 | 0.2145 | 0.440 | 0.184 | 0.098 |
+| small_anchors | anchors 16–256 | 5 | 0.2138 | 0.452 | 0.179 | 0.097 |
+| giou_loss | GIoU box loss instead of smooth L1 | 5 | 0.2169 | 0.442 | 0.187 | 0.086 |
+| more_rois | 1024 RoIs per image, 50% positives, 3000/2000 test proposals | 7 | 0.2171 | 0.452 | 0.179 | 0.102 |
+| small_anchors_giou | small_anchors + GIoU | 8 | 0.2152 | 0.449 | 0.184 | 0.099 |
+| tuned | small_anchors + more_rois + GIoU | 3 | 0.2162 | 0.455 | 0.176 | 0.108 |
+| anchors_3scale | 3 anchor sizes per level from 16 px (k-means), RPN output layers re-initialised | 5 | **0.2234** | 0.461 | 0.192 | 0.099 |
+
+**RetinaNet** (ResNet-50 FPN, COCO weights, focal loss). Code: `src/04_retinanet.ipynb`; results in `runs/retinanet/<run>/summary.json`.
+
+| Run | Change vs baseline | Best epoch | mAP | AP50 | AP75 | AP small |
+|---|---|---|---|---|---|---|
+| baseline | anchors 32–512, focal γ = 2, IoU fg/bg 0.5/0.4 | 7 | 0.1837 | 0.344 | 0.173 | 0.060 |
+| focal_gamma | γ = 1.5 | 8 | **0.1865** | 0.350 | 0.177 | 0.055 |
+| data_anchors | anchors 8–128 (k-means) | 6 | 0.0953 | 0.252 | 0.054 | 0.042 |
+| data_anchors_s2 | anchors 16–256 | 7 | 0.1700 | 0.373 | 0.133 | 0.060 |
+| iou_thresholds | IoU fg/bg 0.4/0.3 | 8 | 0.1426 | 0.270 | 0.135 | 0.050 |
 
 ### 3.2 Anchor-free and query-based detectors
 
