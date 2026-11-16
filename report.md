@@ -23,7 +23,7 @@ The dataset consists of video clips with labeled bounding boxes, their classes, 
 
 The dataset is split into train, validation and test clips by the organizers. As we saw in preprocessing, the splits differ in resolution: test is 680–1920 px wide and train 1344–2720 px, so test has smaller resolutions than train. We also found that test frames contain a much higher proportion of small predicted boxes (57% under 32 px compared to 18% on validation), as well as more camera motion, blur and compression. These differences motivated our experiments with input resolution, smaller anchors and test-like augmentations.
 
-Each clip has little movement: the camera does not move rapidly, and most of the movement comes from moving objects. We addressed that by taking not every frame from the train dataset, but only every 8th one, because we wanted consecutive sampled frames to show noticeable movement of the bounding boxes. That shrinks the dataset, makes training faster (reduced the training dataset from 24,201 to 3,050 frames) and reduces overfitting. We compared the same objects across frames using IoU and chose step 8 as the smallest tested interval satisfying our overlap criterion (IoU ≤ 0.5). 
+Each clip has little movement: the camera does not move rapidly, and most of the movement comes from moving objects. We addressed that by taking not every frame from the train dataset, but only every 8th one, because we wanted consecutive sampled frames to show noticeable movement of the bounding boxes. That shrinks the dataset, makes training faster (reduced the training dataset from 24,201 to 3,050 frames) and reduces overfitting. We compared the same objects across frames using IoU and chose step 8 as the smallest tested interval satisfying our overlap criterion (IoU ≤ 0.5).
 
 | Property | Train / val | Test |
 |---|---|---|
@@ -175,12 +175,11 @@ Fill the TODO scores from runs/kaggle_submissions.csv.
 | B7 + RetinaNet + temporal v1 | 0.3051 | 0.3202 |
 | B7 + RetinaNet, size-aware weights | 0.3027 | 0.3268 |
 | B's 7, RT-DETR weight 2 | 0.2967 | 0.3278 |
-| 10 members, size-aware, FRCNN vote | 0.3138 | TODO |
-| same + temporal v2 | 0.3210 | TODO |
-| B's 18 models | 0.3091 | TODO |
-| B's 18 models + temporal_rescore | TODO | TODO |
+| 10 members, size-aware, FRCNN vote | 0.3138 | 0.3303 |
+| same + temporal v2 | 0.3210 | 0.3335 |
+| B's 18 models | 0.3091 | 0.3175 |
+| B's 18 models + temporal_rescore | 0.3091 | 0.3345 |
 
-![Validation vs public leaderboard per submission](images/val_vs_lb.png)
 
 ## 9. Final model and how to run it
 
