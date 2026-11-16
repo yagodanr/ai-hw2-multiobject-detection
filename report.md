@@ -203,8 +203,3 @@ How to run:
 - run src/temporal_rescore.py with the ensemble submission and RT-DETR support predictions to generate the final CSV
 
 
-## 10. Conclusions
-
-<!--
-[A + B together] ~60 words. Three or four sentences: what worked best, what you would do next with more time.
--->
