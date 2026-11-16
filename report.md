@@ -5,15 +5,6 @@ course: Artificial Intelligence · UCU
 date: 2026-11-16
 ---
 
-<!--
-HOW TO USE THIS TEMPLATE
-- Everything inside <!-- --> comments is guidance and never renders. Delete the comments when a section is done.
-- [A] = Person A writes, [B] = Person B writes. Word budgets add up to ~1,500 (tables and captions not counted).
-- Tables are pre-filled with numbers from the fact sheet. Check every number against its notebook before submitting.
-- Write the prose yourselves. Answer the prompts in your own words; do not paste text from any AI tool.
-- Each result you mention should name the notebook that produced it, e.g. (`02_faster_rcnn.ipynb`).
-- "TODO" marks facts that are still missing (leaderboard scores, final pipeline choice).
--->
 
 ## 1. Task and data
 
