@@ -104,7 +104,7 @@ def predict_image(model, img, imgsz, conf=0.001, iou=0.7, max_det=MAX_DETS, tile
     return merged if len(parts) == 1 else nms_merge(merged, merge_iou, max_det)
 
 
-def fuse(per_model, shape, weights=None, iou=0.55, skip=0.001, max_det=MAX_DETS, top_k=1500):
+def fuse(per_model, shape, weights=None, iou=0.55, skip=0.001, max_det=MAX_DETS, top_k=1500, conf_type="avg"):
     """Weighted box fusion across models (ensemble-boxes). Each model's boxes are cut to its top_k first,
     because WBF is quadratic-ish in Python and the low-score tail does not change mAP's ranking much."""
     from ensemble_boxes import weighted_boxes_fusion
@@ -120,7 +120,8 @@ def fuse(per_model, shape, weights=None, iou=0.55, skip=0.001, max_det=MAX_DETS,
     import warnings
     with warnings.catch_warnings():               # boxes clipped to zero height at the frame edge: harmless
         warnings.simplefilter("ignore")
-        b, s, c = weighted_boxes_fusion(bl, sl, ll, weights=weights, iou_thr=iou, skip_box_thr=skip)
+        b, s, c = weighted_boxes_fusion(bl, sl, ll, weights=weights, iou_thr=iou, skip_box_thr=skip,
+                                        conf_type=conf_type)
     if not len(b):
         return _empty()
     order = np.argsort(-s)[:max_det]

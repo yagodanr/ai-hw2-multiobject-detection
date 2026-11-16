@@ -187,6 +187,8 @@ def train_and_score(name, cfg, protocol, data_yaml, runs_dir, gt_file, data_root
     if cfg.get("weights"):
         model.load(cfg["weights"])           # transfers every layer whose name and shape match
     train_args = {**protocol["train"], **cfg.get("train", {})}
+    if cfg.get("proc_root"):                 # a different TRAIN set (e.g. denser frame sampling); val stays the same
+        data_yaml = write_data_yaml(cfg["proc_root"], Path(runs_dir) / name / "data.yaml")
     model.train(data=str(data_yaml), project=str(runs_dir), name=name, exist_ok=True,
                 imgsz=cfg["imgsz"], epochs=cfg.get("epochs", protocol["epochs"]),
                 batch=cfg.get("batch", protocol["batch"]),

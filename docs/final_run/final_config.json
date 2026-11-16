@@ -1,0 +1,112 @@
+{
+ "wbf_iou": 0.65,
+ "members": {
+  "yolo_low_scale_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_baseline_1280": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_final_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_final_1280": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_m_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_low_scale_960_s1": {
+   "passes": [
+    "full"
+   ]
+  },
+  "yolo_tuned_1280": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_m_1280": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_step4_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_step2_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "yolo_mixup_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "rtdetr_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "rtdetr_final_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "rtdetr_final_960_s025": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "rtdetr_final_1280": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "rtdetr_x_960": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "rtdetr_960_step4": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  },
+  "rtdetr_960_step2": {
+   "passes": [
+    "full",
+    "flip"
+   ]
+  }
+ }
+}

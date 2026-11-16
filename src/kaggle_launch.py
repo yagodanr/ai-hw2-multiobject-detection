@@ -4,6 +4,7 @@ Kaggle notebook cell (experiment names optional; without them, GPU_QUEUES below)
     import glob, subprocess
     launcher = [p for d in range(1, 6) for p in glob.glob("/kaggle/input/" + "*/" * d + "src/kaggle_launch.py")][0]
     subprocess.run(["python", launcher, "final_960", "final_960_s025"], check=True)
+Experiments named *_step<k> (e.g. final_960_s025_step4) first get their denser training set built in /tmp.
 Names are spread over the GPUs in turn (first name on GPU 0, second on GPU 1, third on GPU 0, ...).
 
 - Finds the competition data (folder with test_images.csv) and our uploaded dataset (data_processed/ + src/) under /kaggle/input.
@@ -12,6 +13,7 @@ Names are spread over the GPUs in turn (first name on GPU 0, second on GPU 1, th
 - Every job has a time limit so the whole session stays under Kaggle's 12 h cap (a session that hits the cap may lose its output).
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -73,8 +75,15 @@ def main():
     n_gpu = max(n_gpu, 1)
 
     cpus = os.cpu_count() or 4
+    step_dir = Path("/tmp")                       # denser train sets (kept out of the saved output)
     env_base = {**os.environ, "SRC_DIR": str(src), "DATA_ROOT": str(data_root), "PROC_ROOT": str(proc_root),
-                "RUNS_ROOT": str(runs), "MPLBACKEND": "Agg", "WORKERS": str(max(1, cpus // len(queues)))}
+                "RUNS_ROOT": str(runs), "MPLBACKEND": "Agg", "WORKERS": str(max(1, cpus // len(queues))),
+                "STEP_DATA_DIR": str(step_dir)}
+    # experiments named *_step<k> train on every k-th frame: build that train set first (val stays the same)
+    steps = sorted({int(m.group(1)) for q in queues for n in q for m in [re.search(r"_step(\d+)$", n)] if m})
+    for k in steps:
+        log(f"building the step-{k} training set in {step_dir} (free disk {shutil.disk_usage(step_dir).free / 1e9:.0f} GB)")
+        subprocess.run([sys.executable, "make_train_step.py", str(k)], cwd=src, env=env_base, check=True)
 
     def done(name):
         return (runs / "rtdetr" / name / "summary.json").exists()
