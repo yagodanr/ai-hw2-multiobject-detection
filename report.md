@@ -149,18 +149,13 @@ We also tested a separate, simpler approach in `temporal_rescore.py`, which uses
 
 ## 7. Unsuccessful attempts
 
-<!--
-[A] ~75 words, [B] ~75 words. One or two sentences each: what you tried, the number, what you learned.
-[A] candidates: anchors_3scale (best on val, worse on LB), 8 px RetinaNet anchors, learned rescorer, YOLO26m on test-like frames.
-[B] candidates: tiles / SAHI, long YOLO schedules, denser training frames (step 4 / 2), P2 head, seed noise.
--->
+Some experiments improved validation mAP but didn't generalize to test. Faster R-CNN with three anchor sizes improved val mAP from 0.2145 to 0.2234, but performed worse on the public LB (0.2144 vs 0.2489). Smaller 8 px anchors reduced RetinaNet mAP to 0.0953, while the learned rescorer performed worse than weighted fusion (0.2790 vs 0.3027).
+
+Other unsuccessful attempts included tiling (−0.01 to −0.05 mAP), longer YOLO training (0.1936 vs 0.2173), and denser frame sampling, which didn't improve results. The P2 head didn't converge within 4 epochs, while changing the random seed caused a large mAP difference (0.2206 vs 0.1926).
 
 ## 8. Validation vs leaderboard
 
-<!--
-[A] ~80 words. Answer: where did val and the leaderboard agree, where not, and what do you think caused it?
-Fill the TODO scores from runs/kaggle_submissions.csv.
--->
+
 
 | Submission | Val mAP | Public LB |
 |---|---|---|
