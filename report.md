@@ -24,6 +24,13 @@ HOW TO USE THIS TEMPLATE
 - How are ignored regions handled in training vs in scoring?
 - How does test differ from val? Refer to the table below; say what you concluded from it.
 -->
+The task is to detect objects of 8 classes in drone video clips of different resolutions, where most objects are small. The small size makes the task difficult: there are fewer pixels per object, a bounding box error of a few pixels is more harmful, and the detections are harder to classify.
+
+The dataset consists of video clips with labeled bounding boxes, their classes, and ignored areas, where detections are not scored. Those ignored areas typically contain many objects too small to classify, so in preprocessing we fill them with grey rectangles. The test dataset does not have any ignored areas in it.
+
+The dataset is split into train, validation and test clips by the organizers. As we saw in preprocessing, the splits differ in resolution: test is 680–1920 px wide and train 1344–2720 px, so test has smaller resolutions than train.
+
+Each clip has little movement: the camera does not move rapidly, and most of the movement comes from moving objects. We addressed that by taking not every frame from the train dataset, but only every 8th one, because we wanted consecutive sampled frames to show noticeable movement of the bounding boxes. That shrinks the dataset, makes training faster and reduces overfitting.
 
 | Property | Train / val | Test |
 |---|---|---|
